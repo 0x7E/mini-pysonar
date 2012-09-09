@@ -78,7 +78,6 @@ class Type:
     pass
 
 
-
 nUnknown = 0
 class UnknownType(Type):
     def __init__(self, name=None):
@@ -90,8 +89,6 @@ class UnknownType(Type):
         nUnknown += 1
     def __repr__(self):
         return str(self.name)
-
-
 
 
 class PrimType(Type):
@@ -108,8 +105,6 @@ class PrimType(Type):
         return not self.__eq__(other)
 
 
-
-
 class ClassType(Type):
     def __init__(self, name):
         self.name = name
@@ -122,8 +117,6 @@ class ClassType(Type):
             return False
     def __ne__(self, other):
         return not self.__eq__(other)
-
-
 
 
 class FuncType(Type):
@@ -142,8 +135,6 @@ class FuncType(Type):
         return not self.__eq__(other)
 
 
-
-
 class Closure(Type):
     def __init__(self, func, env):
         self.func = func
@@ -151,8 +142,6 @@ class Closure(Type):
         self.defaults = []
     def __repr__(self):
         return str(self.func)
-
-
 
 
 class TupleType(Type):
@@ -175,7 +164,6 @@ class TupleType(Type):
         return not self.__eq__(other)
 
 
-
 class ListType(Type):
     def __init__(self, elts):
         self.elts = elts
@@ -196,7 +184,6 @@ class ListType(Type):
         return not self.__eq__(other)
 
 
-
 class DictType(Type):
     def __init__(self, dic):
         self.dic = dic
@@ -215,7 +202,6 @@ class DictType(Type):
         return not self.__eq__(other)
 
 
-
 class UnionType(Type):
     def __init__(self, elts):
         self.elts = elts
@@ -223,18 +209,13 @@ class UnionType(Type):
         return "U:" + str(self.elts)
 
 
-
-
 # singleton primtive types
 contType = PrimType('cont')
 bottomType = PrimType('_|_')
 
 
-
-
 # need to rewrite this when we have recursive types
 def typeEqual(t1, t2):
-#    print "typeEqual:", t1, t2, t1 == t2
     if IS(t1, list) and IS(t2, list):
         for bd1 in t1:
             if bd1 not in t2:
@@ -244,10 +225,7 @@ def typeEqual(t1, t2):
         return t1 == t2
 
 
-
-
 def subtypeBindings(rec1, rec2):
-#    print "subtypeBindings:", rec1, rec2
     def find(a, rec2):
         for b in rec2:
             if (first(a) == first(b)) and typeEqual(rest(a), rest(b)):
@@ -257,8 +235,6 @@ def subtypeBindings(rec1, rec2):
         if not find(a, rec2):
             return False
     return True
-
-
 
 
 def union(ts):
@@ -272,8 +248,6 @@ def union(ts):
             if t not in u:
                 u.append(t)
     return u
-
-
 
 
 
@@ -294,7 +268,6 @@ class Bind:
                 self.loc == other.loc)
 
 
-
 class BindIterator:
     def __init__(self, p):
         self.p = p
@@ -310,23 +283,20 @@ class BindIterator:
             return self.p.loc
 
 
-
 def typeOnly(bs):
     return union(bs)
 
 
-
-def hasType(t, u):
+# test whether a type is in a union
+def inUnion(t, u):
     for t2 in u:
         if t == t2:
             return True
     return False
 
 
-
 def removeType(t, u):
     return filter(lambda x: x <> t, u)
-
 
 
 # combine two environments, make unions when necessary
@@ -341,7 +311,6 @@ def mergeEnv(env1, env2):
     return ret
 
 
-
 # compare both str's and Name's for equivalence, because
 # keywords are str's (bad design of the ast)
 def getId(x):
@@ -349,7 +318,6 @@ def getId(x):
         return x.id
     else:
         return x
-
 
 
 def bind(target, value, env):
@@ -379,8 +347,6 @@ def bind(target, value, env):
         return env
 
 
-
-
 def onStack(call, args, stk):
     for p1 in stk:
         call2 = first(p1)
@@ -388,8 +354,6 @@ def onStack(call, args, stk):
         if call == call2 and subtypeBindings(args, args2):
             return True
     return False
-
-
 
 
 # invoke one closure in the union
@@ -420,7 +384,6 @@ def invoke1(call, clo, env, stk):
         t = infer(call.args[i], env, stk)
         pos = bind(func.args.args[i], t, pos)
 
-
     # put extra positionals into vararg if provided
     # report error and go on otherwise
     if len(call.args) > len(func.args.args):
@@ -435,7 +398,6 @@ def invoke1(call, clo, env, stk):
                 ts = ts + t
             pos = bind(func.args.vararg, ts, pos)
 
-
     # bind keywords, collect kwarg
     ids = map(getId, func.args.args)
     for k in call.keywords:
@@ -449,7 +411,6 @@ def invoke1(call, clo, env, stk):
         else:
             pos = bind(k.arg, ts, pos)
 
-
     # put extras in kwarg or report them
     if kwarg <> nil:
         if func.args.kwarg <> None:
@@ -460,7 +421,6 @@ def invoke1(call, clo, env, stk):
             putInfo(call, TypeError("unexpected keyword arguements", kwarg))
     elif func.args.kwarg <> None:
         pos = bind(func.args.kwarg, DictType(nil), pos)
-
 
     # bind defaults, avoid overwriting bound vars
     i = len(func.args.args) - len(func.args.defaults)
@@ -485,7 +445,6 @@ def invoke1(call, clo, env, stk):
     return to
 
 
-
 def invoke(call, env, stk):
     clos = infer(call.func, env, stk)
     totypes = []
@@ -493,8 +452,6 @@ def invoke(call, env, stk):
         t = invoke1(call, clo, env, stk)
         totypes = totypes + t
     return totypes
-
-
 
 
 # pre-bind names to functions in sequences (should add classes later)
@@ -507,7 +464,7 @@ def close(ls, env):
 
 
 def terminate(t):
-    return not hasType(contType, t)
+    return not inUnion(contType, t)
 
 
 def finalize(t):
@@ -520,13 +477,10 @@ def inferSeq(exp, env, stk):
         return ([contType], env)
 
     e = exp[0]
-
     if IS(e, If):
         tt = infer(e.test, env, stk)
         (t1, env1) = inferSeq(e.body, close(e.body, env), stk)
         (t2, env2) = inferSeq(e.orelse, close(e.orelse, env), stk)
-
-        print 't1:', t1, terminate(t1), ', t2:', t2, terminate(t2), removeType(bottomType, t2)
 
         if terminate(t1) and terminate(t2):    # both terminates
             for e2 in exp[1:]:
@@ -577,8 +531,6 @@ def inferSeq(exp, env, stk):
 
     else:
         raise TypeError('recognized node in effect context', e)
-
-
 
 
 def infer(exp, env, stk):
@@ -642,17 +594,12 @@ def infer(exp, env, stk):
 
 
 
-
-
-
 ##################################################################
 # drivers(wrappers)
 ##################################################################
 def parseFile(filename):
     f = open(filename, 'r');
     return parse(f.read())
-
-
 
 
 # clean up globals
@@ -670,7 +617,7 @@ def nodekey(node):
 
 
 # check a single (parsed) expression
-def son(exp):
+def checkExp(exp):
     clear()
     ret = infer(exp, nil, nil)
     if history.keys() <> []:
@@ -680,23 +627,20 @@ def son(exp):
         print "\n"
 
 
-
 # check a string
-def so(s):
-    return son(parse(s))
-
+def checkString(s):
+    return checkExp(parse(s))
 
 
 # check a file
-def sonar(filename):
+def checkFile(filename):
     f = open(filename, 'r');
-    so(f.read())
-
+    checkString(f.read())
 
 
 
 ###################################################################
-# printing support
+# hacky printing support for AST
 ###################################################################
 def dump(node, annotate_fields=True, include_attributes=False):
     def _format(node):
@@ -720,7 +664,6 @@ def dump(node, annotate_fields=True, include_attributes=False):
     return _format(node)
 
 
-
 def printList(ls):
     if (ls == None or ls == []):
         return ""
@@ -728,7 +671,6 @@ def printList(ls):
         return str(ls[0])
     else:
         return str(ls)
-
 
 
 def printAst(node):
@@ -786,4 +728,5 @@ def installPrinter():
 
 installPrinter()
 
-sonar('tests/chain.py')
+# test the checker on a file
+checkFile('tests/chain.py')
