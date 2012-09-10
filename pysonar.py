@@ -1,7 +1,7 @@
 # pysonar.py - a Python version of PySonar static analyzer for Python
 # Copyright (C) 2011 Yin Wang (yinwang0@gmail.com)
 
-
+import sys
 import re
 from ast import *
 from lists import *
@@ -210,8 +210,8 @@ class UnionType(Type):
 
 
 # singleton primtive types
-contType = PrimType('cont')
-bottomType = PrimType('_|_')
+contType = PrimType('cont')             # continuation type
+bottomType = PrimType('_|_')            # non-terminating recursion
 
 
 # need to rewrite this when we have recursive types
@@ -356,7 +356,7 @@ def onStack(call, args, stk):
     return False
 
 
-# invoke one closure in the union
+# invoke one closure
 def invoke1(call, clo, env, stk):
 
     if (clo == bottomType):
@@ -423,6 +423,7 @@ def invoke1(call, clo, env, stk):
         pos = bind(func.args.kwarg, DictType(nil), pos)
 
     # bind defaults, avoid overwriting bound vars
+    # types for defaults are already inferred when the function was defined
     i = len(func.args.args) - len(func.args.defaults)
     ndefaults = len(func.args.args)
     for j in xrange(len(clo.defaults)):
@@ -434,17 +435,24 @@ def invoke1(call, clo, env, stk):
     # finish building the input type
     fromtype = maplist(lambda p: Pair(first(p), typeOnly(rest(p))), pos)
 
-    # check whether the same call is on stack with same input types
+    # check whether the same call site is on stack with same input types
+    # if so, we are back to a loop, terminate
     if onStack(call, fromtype, stk):
         return [bottomType]
 
+    # push the call site onto the stack and analyze the function body
     stk = ext(call, fromtype, stk)
     fenv = append(pos, fenv)
     to = infer(func.body, fenv, stk)
+
+    # record the function type
     putInfo(func, FuncType(reverse(fromtype), to))
     return to
 
 
+
+# invoke a union of closures. call invoke1 on each of them and collect
+# their return types into a union
 def invoke(call, env, stk):
     clos = infer(call.func, env, stk)
     totypes = []
@@ -452,6 +460,7 @@ def invoke(call, env, stk):
         t = invoke1(call, clo, env, stk)
         totypes = totypes + t
     return totypes
+
 
 
 # pre-bind names to functions in sequences (should add classes later)
@@ -463,7 +472,8 @@ def close(ls, env):
     return env
 
 
-def terminate(t):
+
+def isTerminating(t):
     return not inUnion(contType, t)
 
 
@@ -471,6 +481,8 @@ def finalize(t):
     return removeType(contType, t)
 
 
+
+# infer a sequence of statements
 def inferSeq(exp, env, stk):
 
     if exp == []:                       # reached end without return
@@ -482,21 +494,21 @@ def inferSeq(exp, env, stk):
         (t1, env1) = inferSeq(e.body, close(e.body, env), stk)
         (t2, env2) = inferSeq(e.orelse, close(e.orelse, env), stk)
 
-        if terminate(t1) and terminate(t2):    # both terminates
+        if isTerminating(t1) and isTerminating(t2):                   # both terminates
             for e2 in exp[1:]:
                 putInfo(e2, TypeError('unreachable code'))
             return (union([t1, t2]), env)
 
-        elif terminate(t1) and not terminate(t2):     # t1 terminates
+        elif isTerminating(t1) and not isTerminating(t2):             # t1 terminates
             (t3, env3) = inferSeq(exp[1:], env2, stk)
-            t2 = finalize(t2)            
+            t2 = finalize(t2)
             return (union([t1, t2, t3]), env3)
 
-        elif not terminate(t1) and terminate(t2):             # t2 terminates
+        elif not isTerminating(t1) and isTerminating(t2):             # t2 terminates
             (t3, env3) = inferSeq(exp[1:], env1, stk)
             t1 = finalize(t1)
             return (union([t1, t2, t3]), env3)
-        else:                           # both non-terminating
+        else:                                                         # both non-terminating
             (t3, env3) = inferSeq(exp[1:], mergeEnv(env1, env2), stk)
             t1 = finalize(t1)
             t2 = finalize(t2)
@@ -511,9 +523,8 @@ def inferSeq(exp, env, stk):
     elif IS(e, FunctionDef):
         cs = lookup(e.name, env)
         for c in cs:
-            c.env = env                   # create circular env
-
-        for d in e.args.defaults:
+            c.env = env                          # create circular env to support recursion
+        for d in e.args.defaults:                # infer types for default arguments
             dt = infer(d, env, stk)
             c.defaults.append(dt)
         return inferSeq(exp[1:], env, stk)
@@ -533,6 +544,8 @@ def inferSeq(exp, env, stk):
         raise TypeError('recognized node in effect context', e)
 
 
+
+# main type inferencer
 def infer(exp, env, stk):
 
     if IS(exp, Module):
@@ -540,8 +553,7 @@ def infer(exp, env, stk):
 
     elif IS(exp, list):
         env = close(exp, env)
-        # env ignored because out of scope
-        (t, ignoreEnv) = inferSeq(exp, env, stk)
+        (t, ignoreEnv) = inferSeq(exp, env, stk)    # env ignored (out of scope)
         return t
 
     elif IS(exp, Num):
@@ -556,8 +568,8 @@ def infer(exp, env, stk):
             putInfo(exp, b)
             return b
         else:
-            try:                    # use information from Python interp
-                t = type(eval(exp.id))
+            try:
+                t = type(eval(exp.id))     # try use information from Python interpreter
                 return [PrimType(t)]
             except NameError as err:
                 putInfo(exp, err)
@@ -588,7 +600,6 @@ def infer(exp, env, stk):
     #         eltTypes.append(t)
     #     return [Bind(TupleType(eltTypes), exp)]
 
-
     else:
         return [UnknownType()]
 
@@ -613,7 +624,7 @@ def nodekey(node):
     if hasattr(node, 'lineno'):
         return node.lineno
     else:
-        return 1000000
+        return sys.maxint
 
 
 # check a single (parsed) expression
@@ -623,8 +634,8 @@ def checkExp(exp):
     if history.keys() <> []:
         print "---------------------------- history ----------------------------"
         for k in sorted(history.keys(), key=nodekey):
-            print k, ":", history[k]
-        print "\n"
+            print(k, ":", history[k])
+        print("\n")
 
 
 # check a string
@@ -681,13 +692,18 @@ def printAst(node):
     elif (IS(node, ClassDef)):
         ret = "class:" + str(node.name)
     elif (IS(node, Call)):
-        ret = "call:" + str(node.func) + ":(" + printList(node.args) + ")"
+        ret = ("call:" + str(node.func)
+               + ":(" + printList(node.args) + ")")
     elif (IS(node, Assign)):
-        ret = "(" + printList(node.targets) + " <- " + printAst(node.value) + ")"
+        ret = ("(" + printList(node.targets)
+               + " <- " + printAst(node.value) + ")")
     elif (IS(node, If)):
-        ret = "if " + str(node.test) + ":" + printList(node.body) + ":" + printList(node.orelse)
+        ret = ("if " + str(node.test)
+               + ":" + printList(node.body)
+               + ":" + printList(node.orelse))
     elif (IS(node, Compare)):
-        ret = str(node.left) + ":" + printList(node.ops) + ":" + printList(node.comparators)
+        ret = (str(node.left) + ":" + printList(node.ops)
+               + ":" + printList(node.comparators))
     elif (IS(node, Name)):
         ret = str(node.id)
     elif (IS(node, Num)):
@@ -697,11 +713,15 @@ def printAst(node):
     elif (IS(node, Return)):
         ret = "return " + repr(node.value)
     elif (IS(node, Print)):
-        ret = "print(" + (str(node.dest) + ", " if (node.dest!=None) else "") + printList(node.values) + ")"
+        ret = ("print(" + (str(node.dest)
+               + ", " if (node.dest!=None) else "")
+               + printList(node.values) + ")")
     elif (IS(node, Expr)):
         ret = "expr:" + str(node.value)
     elif (IS(node, BinOp)):
-        ret = str(node.left) + " " + str(node.op) + " " + str(node.right)
+        ret = (str(node.left) + " "
+               + str(node.op) + " "
+               + str(node.right))
     elif (IS(node, Mult)):
         ret = '*'
     elif (IS(node, Add)):
@@ -714,7 +734,8 @@ def printAst(node):
         ret = str(type(node))
 
     if hasattr(node, 'lineno'):
-        return re.sub("@[0-9]+", '', ret) + "@" + str(node.lineno)
+        return (re.sub("@[0-9]+", '', ret)
+                + "@" + str(node.lineno))
     else:
         return ret
 
@@ -727,6 +748,7 @@ def installPrinter():
             obj.__repr__ = printAst
 
 installPrinter()
+
 
 # test the checker on a file
 checkFile('tests/chain.py')
